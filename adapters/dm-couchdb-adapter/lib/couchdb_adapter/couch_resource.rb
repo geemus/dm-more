@@ -18,6 +18,15 @@ module DataMapper
         property :rev, String, :field => '_rev'
         property :couchdb_type, DataMapper::Types::Discriminator
 
+        def to_couchrest_hash
+          values = {}
+          properties.each do |property|
+            next unless attribute_loaded?(property.name) && value = property.get!(self)
+            values[property.field] = value
+          end
+          values
+        end
+
         class << self
 
           def couchdb_types

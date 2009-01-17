@@ -17,6 +17,8 @@ require Pathname(__FILE__).dirname + 'couchdb_adapter/couch_resource'
 require Pathname(__FILE__).dirname + 'couchdb_adapter/json_object'
 require Pathname(__FILE__).dirname + 'couchdb_adapter/view'
 
+require 'couchrest'
+
 module DataMapper
   module Resource
     # Converts a Resource to a JSON representation.
@@ -45,6 +47,10 @@ module DataMapper
         @resource_naming_convention = NamingConventions::Resource::Underscored
       end
 
+      def db
+        @db ||= CouchRest.database!("http://#{@uri.host}:#{@uri.port}/#{self.escaped_db_name}")
+      end
+
       # Returns the name of the CouchDB database.
       #
       # Raises an exception if the CouchDB database name is invalid.
@@ -63,21 +69,14 @@ module DataMapper
           self.db_name, Addressable::URI::CharacterClasses::UNRESERVED)
       end
 
-      # Creates a new resources in the specified repository.
+      # Creates new resources in the specified repository.
       def create(resources)
         created = 0
-        resources.each do |resource|
-          key = resource.class.key(self.name).map do |property|
-            resource.instance_variable_get(property.instance_variable_name)
-          end
-          if key.compact.empty?
-            result = http_post("/#{self.escaped_db_name}", resource.to_couch_json(true))
-          else
-            result = http_put("/#{self.escaped_db_name}/#{key}", resource.to_couch_json(true))
-          end
-          if result["ok"]
-            resource.id = result["id"]
-            resource.rev = result["rev"]
+        resources.each_with_index do |resource, index|
+          result = db.save(resource.to_couchrest_hash, resources.length != index + 1)
+          if result['ok']
+            resource.id   = result['id']
+            resource.rev  = result['rev']
             created += 1
           end
         end
@@ -88,14 +87,11 @@ module DataMapper
       def delete(query)
         deleted = 0
         resources = read_many(query)
-        resources.each do |resource|
-          key = resource.class.key(self.name).map do |property|
-            resource.instance_variable_get(property.instance_variable_name)
+        resources.each_with_index do |resource, index|
+          result = db.delete(resource.to_couchrest_hash, resources.length != index + 1)
+          if result['ok']
+            deleted += 1
           end
-          result = http_delete(
-            "/#{self.escaped_db_name}/#{key}?rev=#{resource.rev}"
-          )
-          deleted += 1 if result["ok"]
         end
         deleted
       end
@@ -104,14 +100,11 @@ module DataMapper
       def update(attributes, query)
         updated = 0
         resources = read_many(query)
-        resources.each do |resource|
-          key = resource.class.key(self.name).map do |property|
-            resource.instance_variable_get(property.instance_variable_name)
-          end
-          result = http_put("/#{self.escaped_db_name}/#{key}", resource.to_couch_json)
-          if result["ok"]
-            resource.id = result["id"]
-            resource.rev = result["rev"]
+        resources.each_with_index do |resource, index|
+          result = db.save(resource.to_couchrest_hash, resources.length != index + 1)
+          if result['ok']
+            resource.id  = result['id']
+            resource.rev = result['rev']
             updated += 1
           end
         end
