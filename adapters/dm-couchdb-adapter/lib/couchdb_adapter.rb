@@ -34,7 +34,7 @@ module DataMapper
           end
       end
       data.delete('_attachments') if data['_attachments'].nil? || data['_attachments'].empty?
-      return data.to_json
+      return data.to_jsonf
     end
   end
 end
@@ -371,7 +371,7 @@ module DataMapper
 
       module Migration
         def create_model_storage(repository, model)
-          uri = "/#{self.escaped_db_name}/_design%2F#{model.base_model.to_s}"
+          uri = "/#{self.escaped_db_name}/_design/#{model.base_model.to_s}"
           view = Net::HTTP::Put.new(uri)
           view['content-type'] = "application/json"
           views = model.views.reject {|key, value| value.nil?}
@@ -382,7 +382,7 @@ module DataMapper
         end
 
         def destroy_model_storage(repository, model)
-          uri = "/#{self.escaped_db_name}/_design%2F#{model.base_model.to_s}"
+          uri = "/#{self.escaped_db_name}/_design/#{model.base_model.to_s}"
           response = http_get(uri)
           unless response['error']
             uri += "?rev=#{response["_rev"]}"
