@@ -5,7 +5,7 @@ module DataMapper
 end
 
 module DataMapper
-  module CouchResource
+  module Couch
     class View
       attr_reader :model, :name
 

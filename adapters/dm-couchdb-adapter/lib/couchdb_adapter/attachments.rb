@@ -6,7 +6,7 @@ gem 'mime-types', '~>1.15'
 require 'mime/types'
 
 module DataMapper
-  module CouchResource
+  module Couch
     module Attachments
 
       def self.included(mod)

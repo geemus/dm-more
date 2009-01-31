@@ -16,28 +16,9 @@ require Pathname(__FILE__).dirname + 'couchdb_adapter/attachments'
 require Pathname(__FILE__).dirname + 'couchdb_adapter/couch_resource'
 require Pathname(__FILE__).dirname + 'couchdb_adapter/json_object'
 require Pathname(__FILE__).dirname + 'couchdb_adapter/view'
+require Pathname(__FILE__).dirname + 'couchdb_adapter/views'
 
 require 'couchrest'
-
-module DataMapper
-  module Resource
-    # Converts a Resource to a JSON representation.
-    def to_couch_json(dirty = false)
-      property_list = self.class.properties.select { |key, value| dirty ? self.dirty_attributes.key?(key) : true }
-      data = {}
-      for property in property_list do
-        data[property.field] =
-          if property.type.respond_to?(:dump)
-            property.type.dump(property.get!(self), property)
-          else
-            property.get!(self)
-          end
-      end
-      data.delete('_attachments') if data['_attachments'].nil? || data['_attachments'].empty?
-      return data.to_jsonf
-    end
-  end
-end
 
 module DataMapper
   module Adapters
@@ -267,15 +248,16 @@ module DataMapper
         couchdb_type_conditions = couchdb_type_condition.join(' || ')
 
         if query.conditions.empty?
-          request.body =
-%Q({"map":
+          request.body = <<-JAVASCRIPT
+{
+  "map":
   "function(doc) {
-  if (#{couchdb_type_conditions}) {
-    emit(#{key}, doc);
+    if (#{couchdb_type_conditions}) {
+      emit(#{key}, doc);
     }
   }"
 }
-)
+JAVASCRIPT
         else
           conditions = query.conditions.map do |operator, property, value|
             if operator == :eql && value.is_a?(Array)
@@ -297,15 +279,16 @@ module DataMapper
               end
             end
           end
-          request.body =
-%Q({"map":
+          request.body = <<-JAVASCRIPT
+{ 
+  "map":
   "function(doc) {
     if ((#{couchdb_type_conditions}) && #{conditions.join(' && ')}) {
       emit(#{key}, doc);
     }
   }"
 }
-)
+JAVASCRIPT
         end
         request
       end
