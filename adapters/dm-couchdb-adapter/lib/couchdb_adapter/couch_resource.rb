@@ -7,52 +7,28 @@ end
 module DataMapper
   module Couch
     module Resource
-      def self.included(mod)
+      def self.included(model)
 
-        mod.class_eval do
+        model.class_eval do
           include DataMapper::Resource
-          include DataMapper::Couch::Attachments
-          include DataMapper::Couch::Views
 
           property :attachments, DataMapper::Types::JsonObject, :field => '_attachments'
           property :id, String, :key => true, :field => '_id', :nullable => true
           property :rev, String, :field => '_rev'
+          property :view, DataMapper::Types::JsonObject
           property :couchdb_type, DataMapper::Types::Discriminator
+
+          include DataMapper::Couch::Attachments
+          include DataMapper::Couch::Views
 
           def to_couchrest_hash
             values = {}
             properties.each do |property|
-              next unless attribute_loaded?(property.name) && value = property.get!(self)
+              next if property.name == 'view' || !(attribute_loaded?(property.name) && value = property.get!(self))
               values[property.field] = value
             end
             values
           end
-
-          class << self
-
-            def couchdb_types
-              [self.base_model] | self.descendants
-            end
-
-            def couchdb_types_condition
-              couchdb_types.collect {|type| "doc.couchdb_type == '#{type}'"}.join(' || ')
-            end
-
-            def view(name, &block)
-              @views ||= Hash.new { |h,k| h[k] = {} }
-              view = View.new(self, name)
-              @views[repository.name][name] = block_given? ? block : lambda {}
-              view
-            end
-
-            def views(repository_name = default_repository_name)
-              @views ||= Hash.new { |h,k| h[k] = {} }
-              views = @views[repository_name].dup
-              views.each_pair {|key, value| views[key] = value.call}
-            end
-
-          end
-
         end
 
       end
