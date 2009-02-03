@@ -185,7 +185,7 @@ module DataMapper
               query.conditions.first[2] &&
               (query.conditions.first[2].length == 1 ||
               !query.conditions.first[2].is_a?(Array))
-          get_request(query)
+          get(query)
         else
           ad_hoc_request(query)
         end
@@ -215,9 +215,8 @@ module DataMapper
         request
       end
 
-      def get_request(query)
-        uri = "/#{self.escaped_db_name}/#{query.conditions.first[2]}"
-        request = Net::HTTP::Get.new(uri)
+      def get(query)
+        db.get(query.conditions.first[2])
       end
 
       ##
