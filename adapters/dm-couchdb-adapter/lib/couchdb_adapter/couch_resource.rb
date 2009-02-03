@@ -7,8 +7,8 @@ end
 module DataMapper
   module Couch
     module Resource
-      def self.included(model)
 
+      def self.included(model)
         model.class_eval do
           include DataMapper::Resource
 
@@ -29,9 +29,10 @@ module DataMapper
             end
             values
           end
-        end
 
+        end
       end
-    end
-  end
-end
+
+    end # Resource
+  end # Couch
+end # DataMapper
