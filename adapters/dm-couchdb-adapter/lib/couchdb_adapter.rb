@@ -94,64 +94,81 @@ module DataMapper
 
       # Reads in a set from a query.
       def read_many(query)
-        doc = request do |http|
-          http.request(build_request(query))
-        end
-        if query.view && query.model.views[query.view.to_sym].has_key?('reduce')
-          doc['rows']
-        else
-          collection =
-          if doc['rows'] && !doc['rows'].empty?
-            Collection.new(query) do |collection|
-              doc['rows'].each do |doc|
-                data = doc["value"]
-                  collection.load(
-                    query.fields.map do |property|
-                      property.typecast(data[property.field])
-                    end
-                  )
-              end
-            end
-          elsif doc['couchdb_type'] &&
-                query.model.couchdb_types.collect {|type| type.to_s}.include?(doc['couchdb_type'])
-            data = doc
-            Collection.new(query) do |collection|
-              collection.load(
-                query.fields.map do |property|
-                  property.typecast(data[property.field])
-                end
-              )
-            end
-          else
-            Collection.new(query) { [] }
+        doc = couch_request(query)
+        results = load(doc, query)
+
+        Collection.new(query) do |collection|
+          doc['rows'].each do |row|
+            collection.replace(results)
           end
-          collection.total_rows = doc && doc['total_rows'] || 0
-          collection
         end
+
+        # row = doc['rows'].first
+        # Object.const_get(:"#{row['value']['couchdb_type']}").load(
+        #   query.fields.map do |property|
+        #     property.typecast(row['value'][property.field])
+        #   end,
+        #   query
+        # )
+
+        # if query.view && query.model.views[query.view.to_sym].has_key?('reduce')
+        #   doc['rows']
+        # else
+        #   collection =
+        #   if doc['rows'] && !doc['rows'].empty?
+        #     Collection.new(query) do |collection|
+        #       doc['rows'].each do |doc|
+        #         data = doc["value"]
+        #           collection.load(
+        #             query.fields.map do |property|
+        #               property.typecast(data[property.field])
+        #             end
+        #           )
+        #       end
+        #     end
+        #   elsif doc['couchdb_type'] &&
+        #         query.model.couchdb_types.collect {|type| type.to_s}.include?(doc['couchdb_type'])
+        #     data = doc
+        #     Collection.new(query) do |collection|
+        #       collection.load(
+        #         query.fields.map do |property|
+        #           property.typecast(data[property.field])
+        #         end
+        #       )
+        #     end
+        #   else
+        #     Collection.new(query) { [] }
+        #   end
+        #   collection.total_rows = doc && doc['total_rows'] || 0
+        #   collection
+        # end
       end
 
+      # {"rows"=>[{"id"=>"8eee718ccdda850da50e31352d35e1a2", "value"=>{"name"=>"Bob", "couchdb_type"=>"Person", "_rev"=>"3444631025", "_id"=>"8eee718ccdda850da50e31352d35e1a2"}, "key"=>"8eee718ccdda850da50e31352d35e1a2"}], "offset"=>0, "total_rows"=>1}
       def read_one(query)
-        doc = request do |http|
-          http.request(build_request(query))
-        end
-        if doc['rows'] && !doc['rows'].empty?
-          data = doc['rows'].first['value']
-        elsif !doc['rows'] &&
-                doc['couchdb_type'] &&
-                query.model.couchdb_types.collect {|type| type.to_s}.include?(doc['couchdb_type'])
-            data = doc
-        end
-        if data
-          query.model.load(
-            query.fields.map do |property|
-              property.typecast(data[property.field])
-            end,
-            query
-          )
+        doc = couch_request(query)
+        data = doc['rows'].first['value']
+        if data['couchdb_type'] && query.model.couchdb_types.collect {|type| type.to_s}.include?(data['couchdb_type'])
+          load(doc, query)
+        else
+          doc
         end
       end
 
     protected
+
+      def load(doc, query)
+        results = []
+        doc['rows'].each do |row|
+          results << Object.const_get(:"#{row['value']['couchdb_type']}").load(
+            query.fields.map do |property|
+              property.typecast(row['value'][property.field])
+            end,
+            query
+          )
+        end
+        results
+      end
 
       def normalize_uri(uri_or_options)
         if uri_or_options.kind_of?(String) || uri_or_options.kind_of?(Addressable::URI)
@@ -174,6 +191,32 @@ module DataMapper
           :path     => uri_or_options[:database],
           :query    => query
         ))
+      end
+
+      def couch_request(query)
+        if query.conditions.length == 1 &&
+            query.conditions.first[0] == :eql &&
+            query.conditions.first[1].key? &&
+            query.conditions.first[2] &&
+            (query.conditions.first[2].length == 1 ||
+            !query.conditions.first[2].is_a?(Array))
+          db.get(query.conditions.first[2])
+        else
+          query_to_view(query)
+        end
+      end
+
+      def query_to_view(query)
+        if !query.conditions.empty? && view = query.conditions.select {|condition| condition[1].name == :view}.first[2]
+          key = view.keys.first
+          db.view("#{query.model.base_model.to_s}/#{key}", view[key])
+        else
+          options = {}
+          options[:limit] = query.limit if query.limit
+          options[:descending] = query.add_reversed? if query.add_reversed?
+          options[:skip] = query.offset if query.offset != 0
+          db.view("#{query.model.base_model.to_s}/all", options)
+        end
       end
 
       def build_request(query)
@@ -213,10 +256,6 @@ module DataMapper
           request = Net::HTTP::Get.new(uri)
         end
         request
-      end
-
-      def get(query)
-        db.get(query.conditions.first[2])
       end
 
       ##
@@ -353,18 +392,21 @@ JAVASCRIPT
 
       module Migration
         def create_model_storage(repository, model)
-          uri = "/#{self.escaped_db_name}/_design/#{model.base_model.to_s}"
+          uri = "/#{self.escaped_db_name}/_design/#{model.to_s}"
           view = Net::HTTP::Put.new(uri)
           view['content-type'] = "application/json"
-          views = model.views.reject {|key, value| value.nil?}
-          view.body = { :views => views }.to_json
+          # views = model.views.reject {|key, value| value.nil?}
+          view.body = { 
+            'language' => 'javascript',
+            'views' => model.views
+          }.to_json
           request do |http|
             http.request(view)
           end
         end
 
         def destroy_model_storage(repository, model)
-          uri = "/#{self.escaped_db_name}/_design/#{model.base_model.to_s}"
+          uri = "/#{self.escaped_db_name}/_design/#{model.to_s}"
           response = http_get(uri)
           unless response['error']
             uri += "?rev=#{response["_rev"]}"

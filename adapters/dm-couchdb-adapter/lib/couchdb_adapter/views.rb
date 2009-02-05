@@ -22,14 +22,13 @@ module DataMapper
 
         def default_views
           {
-            'language' => 'javascript',
             'views' => {
               'all' => Proc.new {
                 {
                   'map' => <<-JAVASCRIPT
 function(doc) {
   if (#{couchdb_types_condition}) {
-    emit(null,null);
+    emit(doc['_id'], doc);
   }
 }
 JAVASCRIPT
@@ -74,7 +73,7 @@ JAVASCRIPT
               { 'map' => <<-JAVASCRIPT
 function(doc) {
   if (#{([couchdb_types_condition] << guards).join(' && ')}) {
-    emit(#{key_emit}, null);
+    emit(#{key_emit}, doc);
   }
 }
 JAVASCRIPT
